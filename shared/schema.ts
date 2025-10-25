@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { pgTable, serial, text, jsonb, timestamp, integer, varchar, doublePrecision } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
 
 // Rocket Type Enums
 export const RocketCategory = z.enum(["model", "industrial"]);
@@ -111,6 +113,35 @@ export const reverseGeocodeRequestSchema = z.object({
   longitude: z.number(),
 });
 
+// Database Tables
+export const savedAnalyses = pgTable("saved_analyses", {
+  id: serial("id").primaryKey(),
+  analysisId: varchar("analysis_id", { length: 255 }).notNull().unique(),
+  sessionId: varchar("session_id", { length: 255 }),
+  
+  latitude: doublePrecision("latitude").notNull(),
+  longitude: doublePrecision("longitude").notNull(),
+  country: varchar("country", { length: 255 }),
+  city: varchar("city", { length: 255 }),
+  state: varchar("state", { length: 255 }),
+  displayName: text("display_name"),
+  
+  rocketCategory: varchar("rocket_category", { length: 50 }).notNull(),
+  modelType: varchar("model_type", { length: 50 }),
+  safetyLevel: varchar("safety_level", { length: 50 }),
+  
+  analysisData: jsonb("analysis_data").notNull(),
+  overallScore: integer("overall_score").notNull(),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Insert schemas
+export const insertSavedAnalysisSchema = createInsertSchema(savedAnalyses).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Type exports
 export type RocketCategory = z.infer<typeof RocketCategory>;
 export type ModelRocketType = z.infer<typeof ModelRocketType>;
@@ -128,3 +159,5 @@ export type PracticalityAnalysis = z.infer<typeof practicalityAnalysisSchema>;
 export type AnalysisResult = z.infer<typeof analysisResultSchema>;
 export type AnalyzeLocationRequest = z.infer<typeof analyzeLocationRequestSchema>;
 export type ReverseGeocodeRequest = z.infer<typeof reverseGeocodeRequestSchema>;
+export type SavedAnalysis = typeof savedAnalyses.$inferSelect;
+export type InsertSavedAnalysis = z.infer<typeof insertSavedAnalysisSchema>;
