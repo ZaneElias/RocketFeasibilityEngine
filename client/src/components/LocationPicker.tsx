@@ -38,7 +38,8 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
 
   const validateLocationMutation = useMutation({
     mutationFn: async (location: Location) => {
-      return await apiRequest<ZoneValidation>("POST", "/api/validate-zone", { location });
+      const response = await apiRequest("POST", "/api/validate-zone", { location });
+      return await response.json();
     },
     onSuccess: (data) => {
       setZoneValidation(data);
@@ -63,12 +64,31 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
       const { lat, lng } = e.latlng;
       updateMarker(lat, lng);
       
-      const location: Location = {
-        latitude: lat,
-        longitude: lng,
-      };
-      
-      setSelectedLocation(location);
+      try {
+        const response = await apiRequest("POST", "/api/reverse-geocode", {
+          latitude: lat,
+          longitude: lng,
+        });
+        const geocodeData = await response.json();
+        
+        const location: Location = {
+          latitude: lat,
+          longitude: lng,
+          country: geocodeData.country,
+          city: geocodeData.city,
+          state: geocodeData.state,
+          displayName: geocodeData.displayName,
+        };
+        
+        setSelectedLocation(location);
+      } catch (error) {
+        console.error("Geocoding error:", error);
+        const location: Location = {
+          latitude: lat,
+          longitude: lng,
+        };
+        setSelectedLocation(location);
+      }
     });
 
     return () => {
@@ -111,10 +131,29 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
     if (!navigator.geolocation) return;
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
         updateMarker(latitude, longitude);
-        setSelectedLocation({ latitude, longitude });
+        
+        try {
+          const response = await apiRequest("POST", "/api/reverse-geocode", {
+            latitude,
+            longitude,
+          });
+          const geocodeData = await response.json();
+          
+          setSelectedLocation({
+            latitude,
+            longitude,
+            country: geocodeData.country,
+            city: geocodeData.city,
+            state: geocodeData.state,
+            displayName: geocodeData.displayName,
+          });
+        } catch (error) {
+          console.error("Geocoding error:", error);
+          setSelectedLocation({ latitude, longitude });
+        }
       },
       (error) => {
         console.error("Error getting location:", error);
@@ -239,6 +278,33 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
 
             {selectedLocation ? (
               <div className="space-y-4">
+                {selectedLocation.displayName && (
+                  <div className="p-4 bg-primary/5 rounded-lg">
+                    <div className="text-sm font-medium text-foreground mb-2">
+                      {selectedLocation.displayName}
+                    </div>
+                    {(selectedLocation.city || selectedLocation.country) && (
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {selectedLocation.city && (
+                          <Badge variant="secondary" data-testid="badge-city">
+                            {selectedLocation.city}
+                          </Badge>
+                        )}
+                        {selectedLocation.state && (
+                          <Badge variant="secondary" data-testid="badge-state">
+                            {selectedLocation.state}
+                          </Badge>
+                        )}
+                        {selectedLocation.country && (
+                          <Badge variant="secondary" data-testid="badge-country">
+                            {selectedLocation.country}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-2 p-4 bg-muted/50 rounded-lg font-mono text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Latitude:</span>
@@ -253,12 +319,6 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
                     </span>
                   </div>
                 </div>
-
-                {selectedLocation.displayName && (
-                  <div className="text-sm text-muted-foreground">
-                    {selectedLocation.displayName}
-                  </div>
-                )}
 
                 {validateLocationMutation.isPending && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
