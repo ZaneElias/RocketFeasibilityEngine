@@ -50,7 +50,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedRequest = reverseGeocodeRequestSchema.parse(req.body);
       
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${validatedRequest.latitude}&lon=${validatedRequest.longitude}&format=json`
+        `https://nominatim.openstreetmap.org/reverse?lat=${validatedRequest.latitude}&lon=${validatedRequest.longitude}&format=json&addressdetails=1&zoom=18`,
+        {
+          headers: {
+            'User-Agent': 'RocketFeasibilityAnalyzer/1.0'
+          }
+        }
       );
       
       if (!response.ok) {
@@ -59,11 +64,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const data = await response.json();
       
+      const city = data.address?.city || 
+                   data.address?.town || 
+                   data.address?.village || 
+                   data.address?.municipality || 
+                   data.address?.county;
+      
+      const state = data.address?.state || 
+                    data.address?.province || 
+                    data.address?.region;
+      
+      const country = data.address?.country;
+      
+      let displayName = data.display_name;
+      if (data.address?.county && !city) {
+        displayName = `${data.address.county}, ${state || country || ''}`.replace(/, $/, '');
+      }
+      
       res.json({
-        country: data.address?.country,
-        city: data.address?.city || data.address?.town || data.address?.village,
-        state: data.address?.state,
-        displayName: data.display_name,
+        country,
+        city,
+        state,
+        displayName,
       });
     } catch (error: any) {
       console.error("Reverse geocode error:", error);

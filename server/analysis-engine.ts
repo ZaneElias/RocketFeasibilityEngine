@@ -12,6 +12,7 @@ import type {
   AnalysisResult,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { analyzeLocationWithAI } from "./openai-client";
 
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000;
@@ -305,92 +306,99 @@ export async function analyzeLocation(
   const climateFactors = assessClimate(location);
   const politicalStability = await assessPoliticalStability(location);
 
+  const rocketTypeLabel = isModelRocket 
+    ? `Model Rocket (${rocketConfig.modelType || 'hobby'}, ${rocketConfig.safetyLevel || 'beginner'} level)` 
+    : 'Industrial Rocket';
+
+  const aiInsights = await analyzeLocationWithAI({
+    latitude: location.latitude,
+    longitude: location.longitude,
+    country: location.country,
+    city: location.city,
+    state: location.state,
+    displayName: location.displayName,
+    rocketType: rocketTypeLabel,
+    zoneWarnings: zoneValidation.warnings.map(w => w.message),
+  });
+
   const resources: ResourcesAnalysis = {
     materials: createFeasibilityScore(
       Math.min(95, 60 + developmentLevel * 0.3 + (isModelRocket ? 20 : 0)),
-      isModelRocket
-        ? "Model rocket materials are widely available through hobby suppliers and online retailers."
-        : "Industrial rocket components require specialized suppliers and manufacturing facilities."
+      aiInsights.resourcesInsight
     ),
     expertise: createFeasibilityScore(
       Math.min(95, 50 + developmentLevel * 0.4 + (rocketConfig.safetyLevel === "advanced" ? 15 : 0)),
-      "Technical expertise availability varies by location. Consider proximity to aerospace hubs or universities."
+      aiInsights.resourcesInsight
     ),
     facilities: createFeasibilityScore(
       Math.min(95, 40 + developmentLevel * 0.5 + (isModelRocket ? 25 : 0)),
-      isModelRocket
-        ? "Model rockets require minimal facilities - open space and basic launch equipment."
-        : "Industrial rockets need extensive infrastructure including launch pads and mission control."
+      aiInsights.resourcesInsight
     ),
     overall: createFeasibilityScore(0, ""),
   };
   resources.overall = createFeasibilityScore(
     Math.round((resources.materials.score + resources.expertise.score + resources.facilities.score) / 3),
-    "Overall resource availability assessment based on location development and rocket type."
+    aiInsights.resourcesInsight
   );
 
   const legal: LegalAnalysis = {
     permits: createFeasibilityScore(
       Math.max(30, 70 - (zoneValidation.warnings.length * 15) + (isModelRocket ? 10 : -20)),
-      isModelRocket
-        ? "Model rockets typically require minimal permits for hobby use, but check local regulations."
-        : "Industrial launches require extensive permits from aviation, space, and environmental agencies."
+      aiInsights.legalInsight
     ),
     regulations: createFeasibilityScore(
       Math.max(25, 65 + politicalStability * 0.2 - (isModelRocket ? 0 : 15)),
-      "Regulatory framework varies significantly by country. Some regions have established space laws."
+      aiInsights.legalInsight
     ),
     restrictions: createFeasibilityScore(
       zoneValidation.severity === "safe" ? 85 : zoneValidation.severity === "caution" ? 55 : 20,
-      zoneValidation.warnings.length > 0
-        ? "Location has proximity restrictions that may limit launch activities."
-        : "No major restrictions identified for this location."
+      aiInsights.legalInsight
     ),
     overall: createFeasibilityScore(0, ""),
   };
   legal.overall = createFeasibilityScore(
     Math.round((legal.permits.score + legal.regulations.score + legal.restrictions.score) / 3),
-    "Legal and regulatory assessment for rocket launch activities at this location."
+    aiInsights.legalInsight
   );
 
   const geographical: GeographicalAnalysis = {
     terrain: createFeasibilityScore(
       Math.min(90, 70 + (Math.abs(location.latitude) < 30 ? 10 : -5)),
-      "Terrain suitability based on latitude and regional characteristics."
+      aiInsights.geographicalInsight
     ),
     weather: createFeasibilityScore(
       climateFactors.weatherScore,
-      climateFactors.weatherDetails
+      aiInsights.geographicalInsight
     ),
     accessibility: createFeasibilityScore(
       Math.min(95, 55 + developmentLevel * 0.35),
-      "Accessibility depends on local infrastructure and transportation networks."
+      aiInsights.geographicalInsight
     ),
     overall: createFeasibilityScore(0, ""),
   };
   geographical.overall = createFeasibilityScore(
     Math.round((geographical.terrain.score + geographical.weather.score + geographical.accessibility.score) / 3),
-    "Geographical suitability assessment including terrain, weather, and access."
+    aiInsights.geographicalInsight
   );
 
   const geopolitical: GeopoliticalAnalysis = {
     stability: createFeasibilityScore(
       politicalStability,
-      "Political stability affects long-term project viability and regulatory consistency."
+      aiInsights.geopoliticalInsight
     ),
     cooperation: createFeasibilityScore(
       Math.min(90, 50 + politicalStability * 0.4),
-      "International cooperation level influences technology transfer and partnerships."
+      aiInsights.geopoliticalInsight
     ),
     risks: createFeasibilityScore(
       Math.min(95, 85 - (100 - politicalStability) * 0.3),
-      "Geopolitical risk assessment for aerospace activities in the region."
+      aiInsights.geopoliticalInsight
     ),
     overall: createFeasibilityScore(0, ""),
   };
   geopolitical.overall = createFeasibilityScore(
     Math.round((geopolitical.stability.score + geopolitical.cooperation.score + geopolitical.risks.score) / 3),
-    "Geopolitical environment assessment for sustained rocket operations."
+    aiInsights.geopoliticalInsight
   );
 
   const currentMonth = new Date().getMonth();
@@ -458,30 +466,7 @@ export async function analyzeLocation(
       6
   );
 
-  let recommendation = "";
-  if (overallScore >= 70) {
-    recommendation = `This location shows strong feasibility for ${
-      isModelRocket ? "model rocket" : "industrial rocket"
-    } activities. The combination of favorable conditions, adequate resources, and manageable regulatory requirements makes this a viable launch site. Proceed with detailed planning and ensure all permits are obtained before launch.`;
-  } else if (overallScore >= 40) {
-    recommendation = `This location presents moderate feasibility with some challenges that need to be addressed. ${
-      zoneValidation.warnings.length > 0
-        ? "Zone restrictions require careful navigation. "
-        : ""
-    }Consider developing mitigation strategies for identified risks and consulting with local authorities to ensure compliance. Additional resources or partnerships may be needed.`;
-  } else {
-    recommendation = `This location faces significant challenges for rocket launch activities. ${
-      zoneValidation.severity === "danger"
-        ? "Critical zone violations make this location unsuitable. "
-        : ""
-    }Multiple factors including ${
-      legal.overall.score < 50 ? "regulatory barriers, " : ""
-    }${
-      resources.overall.score < 50 ? "resource limitations, " : ""
-    }and ${
-      geographical.overall.score < 50 ? "geographical constraints " : "other challenges "
-    }suggest exploring alternative locations would be advisable.`;
-  }
+  const recommendation = aiInsights.recommendation || "Unable to generate specific recommendation. Please consult with local authorities and aerospace experts.";
 
   return {
     id: randomUUID(),

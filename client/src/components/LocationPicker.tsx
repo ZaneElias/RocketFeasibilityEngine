@@ -118,7 +118,7 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
       }).addTo(mapInstanceRef.current);
     }
 
-    mapInstanceRef.current.setView([lat, lng], 13);
+    mapInstanceRef.current.setView([lat, lng], 10);
   };
 
   useEffect(() => {
