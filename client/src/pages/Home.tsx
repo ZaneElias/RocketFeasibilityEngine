@@ -31,7 +31,8 @@ export default function Home() {
 
   const analyzeMutation = useMutation({
     mutationFn: async (request: AnalyzeLocationRequest) => {
-      return await apiRequest<AnalysisResult>("POST", "/api/analyze", request);
+      const response = await apiRequest("POST", "/api/analyze", request);
+      return await response.json();
     },
     onSuccess: (data) => {
       setAnalysisResult(data);
@@ -52,15 +53,11 @@ export default function Home() {
     setSelectedLocation(location);
     
     try {
-      const geocodeData = await apiRequest<{
-        country?: string;
-        city?: string;
-        state?: string;
-        displayName?: string;
-      }>("POST", "/api/reverse-geocode", {
+      const response = await apiRequest("POST", "/api/reverse-geocode", {
         latitude: location.latitude,
         longitude: location.longitude,
       });
+      const geocodeData = await response.json();
       
       const enrichedLocation: Location = {
         ...location,

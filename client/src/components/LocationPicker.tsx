@@ -278,45 +278,43 @@ export function LocationPicker({ onLocationSelect }: LocationPickerProps) {
 
             {selectedLocation ? (
               <div className="space-y-4">
-                {selectedLocation.displayName && (
-                  <div className="p-4 bg-primary/5 rounded-lg">
-                    <div className="text-sm font-medium text-foreground mb-2">
-                      {selectedLocation.displayName}
-                    </div>
-                    {(selectedLocation.city || selectedLocation.country) && (
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {selectedLocation.city && (
-                          <Badge variant="secondary" data-testid="badge-city">
-                            {selectedLocation.city}
-                          </Badge>
-                        )}
-                        {selectedLocation.state && (
-                          <Badge variant="secondary" data-testid="badge-state">
-                            {selectedLocation.state}
-                          </Badge>
-                        )}
-                        {selectedLocation.country && (
-                          <Badge variant="secondary" data-testid="badge-country">
-                            {selectedLocation.country}
-                          </Badge>
-                        )}
+                <div className="p-5 bg-muted/30 rounded-lg border space-y-3">
+                  <h3 className="text-lg font-semibold mb-3">Location Details</h3>
+                  
+                  <div className="space-y-3">
+                    {selectedLocation.country && (
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Country</div>
+                        <div className="text-sm font-medium" data-testid="badge-country">
+                          {selectedLocation.country}
+                        </div>
                       </div>
                     )}
-                  </div>
-                )}
-
-                <div className="space-y-2 p-4 bg-muted/50 rounded-lg font-mono text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Latitude:</span>
-                    <span className="font-semibold" data-testid="text-latitude">
-                      {selectedLocation.latitude.toFixed(6)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Longitude:</span>
-                    <span className="font-semibold" data-testid="text-longitude">
-                      {selectedLocation.longitude.toFixed(6)}
-                    </span>
+                    
+                    {selectedLocation.state && (
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Region/State</div>
+                        <div className="text-sm font-medium" data-testid="badge-state">
+                          {selectedLocation.state}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Coordinates</div>
+                      <div className="text-sm font-medium font-mono" data-testid="text-coordinates">
+                        {selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)}
+                      </div>
+                    </div>
+                    
+                    {selectedLocation.displayName && (
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Full Address</div>
+                        <div className="text-sm font-medium" data-testid="text-display-name">
+                          {selectedLocation.displayName}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
