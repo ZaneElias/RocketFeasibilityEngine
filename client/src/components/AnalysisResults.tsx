@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AnalysisResult, FeasibilityScore } from "@shared/schema";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
@@ -114,6 +116,125 @@ export function AnalysisResults({ result, onReset }: AnalysisResultsProps) {
         return "text-yellow-600 dark:text-yellow-400 border-yellow-600 dark:border-yellow-400";
       case "not_recommended":
         return "text-red-600 dark:text-red-400 border-red-600 dark:border-red-400";
+    }
+  };
+
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      doc.setFontSize(20);
+      doc.text("Rocket Launch Feasibility Analysis", pageWidth / 2, 20, { align: "center" });
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth / 2, 28, { align: "center" });
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text("Location Details", 14, 40);
+      
+      const locationData = [
+        ["Location", result.location.displayName || `${result.location.latitude.toFixed(6)}, ${result.location.longitude.toFixed(6)}`],
+        ["Coordinates", `${result.location.latitude.toFixed(6)}, ${result.location.longitude.toFixed(6)}`],
+        ["City", result.location.city || "N/A"],
+        ["Country", result.location.country || "N/A"],
+      ];
+      
+      autoTable(doc, {
+        startY: 45,
+        head: [],
+        body: locationData,
+        theme: "plain",
+        styles: { fontSize: 10 },
+        columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
+      });
+      
+      let yPos = (doc as any).lastAutoTable.finalY + 10;
+      
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text(`Overall Feasibility Score: ${result.overallScore}/100`, 14, yPos);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Status: ${getOverallStatus().toUpperCase().replace("_", " ")}`, 14, yPos + 6);
+      
+      yPos += 15;
+      
+      const categories = [
+        { name: "Resources & Availability", data: result.resources.overall },
+        { name: "Government & Legality", data: result.legal.overall },
+        { name: "Geographical Status", data: result.geographical.overall },
+        { name: "Geopolitical Status", data: result.geopolitical.overall },
+        { name: "Best Time & Seasonality", data: result.timing.overall },
+        { name: "Practicality Assessment", data: result.practicality.overall },
+      ];
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text("Category Breakdown", 14, yPos);
+      yPos += 5;
+      
+      autoTable(doc, {
+        startY: yPos,
+        head: [["Category", "Score", "Status"]],
+        body: categories.map(cat => [
+          cat.name,
+          cat.data.score.toString(),
+          cat.data.status.replace("_", " ").toUpperCase(),
+        ]),
+        theme: "striped",
+        headStyles: { fillColor: [74, 144, 226] },
+        styles: { fontSize: 10 },
+      });
+      
+      yPos = (doc as any).lastAutoTable.finalY + 10;
+      
+      if (result.zoneValidation && result.zoneValidation.warnings.length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(200, 0, 0);
+        doc.text("Zone Warnings", 14, yPos);
+        yPos += 5;
+        
+        const warningsData = result.zoneValidation.warnings.map(w => [
+          w.type.toUpperCase(),
+          w.message,
+        ]);
+        
+        autoTable(doc, {
+          startY: yPos,
+          head: [["Type", "Message"]],
+          body: warningsData,
+          theme: "striped",
+          headStyles: { fillColor: [220, 53, 69] },
+          styles: { fontSize: 9 },
+          columnStyles: { 0: { cellWidth: 30 } },
+        });
+        
+        yPos = (doc as any).lastAutoTable.finalY + 10;
+      }
+      
+      if (yPos > 250) {
+        doc.addPage();
+        yPos = 20;
+      }
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text("Final Recommendation", 14, yPos);
+      yPos += 7;
+      
+      doc.setFontSize(10);
+      doc.setTextColor(60);
+      const splitRecommendation = doc.splitTextToSize(result.recommendation, pageWidth - 28);
+      doc.text(splitRecommendation, 14, yPos);
+      
+      const filename = `rocket-feasibility-${result.location.city || "analysis"}-${Date.now()}.pdf`;
+      doc.save(filename);
+    } catch (error) {
+      console.error("PDF export failed:", error);
+      alert("Failed to export PDF. Please try again.");
     }
   };
 
@@ -302,6 +423,7 @@ export function AnalysisResults({ result, onReset }: AnalysisResultsProps) {
         <Button
           variant="outline"
           size="lg"
+          onClick={exportToPDF}
           data-testid="button-export-report"
           aria-label="Export report"
         >
