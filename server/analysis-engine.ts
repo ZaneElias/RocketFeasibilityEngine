@@ -13,36 +13,6 @@ import type {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-const RESTRICTED_ZONES = {
-  airports: [
-    { name: "JFK International Airport", lat: 40.6413, lon: -73.7781, radius: 15000 },
-    { name: "LAX Airport", lat: 33.9416, lon: -118.4085, radius: 15000 },
-    { name: "Heathrow Airport", lat: 51.4700, lon: -0.4543, radius: 15000 },
-    { name: "Dubai International", lat: 25.2532, lon: 55.3657, radius: 15000 },
-    { name: "Tokyo Haneda", lat: 35.5494, lon: 139.7798, radius: 15000 },
-    { name: "O'Hare International", lat: 41.9742, lon: -87.9073, radius: 15000 },
-    { name: "Charles de Gaulle", lat: 49.0097, lon: 2.5479, radius: 15000 },
-    { name: "Singapore Changi", lat: 1.3644, lon: 103.9915, radius: 15000 },
-  ],
-  military: [
-    { name: "Pentagon", lat: 38.8719, lon: -77.0563, radius: 10000 },
-    { name: "Edwards Air Force Base", lat: 34.9054, lon: -117.8840, radius: 20000 },
-    { name: "RAF Lakenheath", lat: 52.4093, lon: 0.5610, radius: 10000 },
-  ],
-  schools: [
-    { name: "Harvard University", lat: 42.3770, lon: -71.1167, radius: 2000 },
-    { name: "Stanford University", lat: 37.4275, lon: -122.1697, radius: 2000 },
-    { name: "MIT", lat: 42.3601, lon: -71.0942, radius: 2000 },
-    { name: "Oxford University", lat: 51.7548, lon: -1.2544, radius: 2000 },
-    { name: "Cambridge University", lat: 52.2043, lon: 0.1218, radius: 2000 },
-    { name: "Tokyo University", lat: 35.7136, lon: 139.7625, radius: 2000 },
-    { name: "Tsinghua University", lat: 40.0037, lon: 116.3261, radius: 2000 },
-    { name: "UCLA", lat: 34.0689, lon: -118.4452, radius: 2000 },
-    { name: "Columbia University", lat: 40.8075, lon: -73.9626, radius: 2000 },
-    { name: "ETH Zurich", lat: 47.3769, lon: 8.5417, radius: 2000 },
-  ],
-};
-
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000;
   const φ1 = (lat1 * Math.PI) / 180;
@@ -58,69 +28,183 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-export function validateZone(location: Location): ZoneValidation {
+interface OSMElement {
+  type: string;
+  id: number;
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
+}
+
+interface OSMResponse {
+  elements: OSMElement[];
+}
+
+async function queryOverpassAPI(lat: number, lon: number, radius: number): Promise<OSMResponse | null> {
+  try {
+    const query = `
+      [out:json][timeout:25];
+      (
+        node["aeroway"="aerodrome"](around:${radius},${lat},${lon});
+        way["aeroway"="aerodrome"](around:${radius},${lat},${lon});
+        relation["aeroway"="aerodrome"](around:${radius},${lat},${lon});
+        
+        node["aeroway"="airport"](around:${radius},${lat},${lon});
+        way["aeroway"="airport"](around:${radius},${lat},${lon});
+        relation["aeroway"="airport"](around:${radius},${lat},${lon});
+        
+        node["amenity"="school"](around:${radius},${lat},${lon});
+        way["amenity"="school"](around:${radius},${lat},${lon});
+        relation["amenity"="school"](around:${radius},${lat},${lon});
+        
+        node["amenity"="university"](around:${radius},${lat},${lon});
+        way["amenity"="university"](around:${radius},${lat},${lon});
+        relation["amenity"="university"](around:${radius},${lat},${lon});
+        
+        node["amenity"="college"](around:${radius},${lat},${lon});
+        way["amenity"="college"](around:${radius},${lat},${lon});
+        
+        node["military"](around:${radius},${lat},${lon});
+        way["military"](around:${radius},${lat},${lon});
+        relation["military"](around:${radius},${lat},${lon});
+        
+        node["landuse"="military"](around:${radius},${lat},${lon});
+        way["landuse"="military"](around:${radius},${lat},${lon});
+        relation["landuse"="military"](around:${radius},${lat},${lon});
+        
+        node["amenity"="hospital"](around:${radius},${lat},${lon});
+        way["amenity"="hospital"](around:${radius},${lat},${lon});
+        
+        node["place"="city"](around:${radius},${lat},${lon});
+        node["place"="town"](around:${radius},${lat},${lon});
+        node["place"="suburb"](around:${radius},${lat},${lon});
+      );
+      out center;
+    `;
+
+    const response = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      body: query,
+      headers: {
+        "Content-Type": "text/plain",
+      },
+    });
+
+    if (!response.ok) {
+      console.error("Overpass API error:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error querying Overpass API:", error);
+    return null;
+  }
+}
+
+function isPointInUrbanArea(lat: number): boolean {
+  return Math.abs(lat) < 60;
+}
+
+export async function validateZone(location: Location): Promise<ZoneValidation> {
   const warnings: ZoneValidation["warnings"] = [];
 
-  for (const airport of RESTRICTED_ZONES.airports) {
-    const distance = calculateDistance(
-      location.latitude,
-      location.longitude,
-      airport.lat,
-      airport.lon
-    );
+  const searchRadius = 20000;
+  const osmData = await queryOverpassAPI(location.latitude, location.longitude, searchRadius);
 
-    if (distance < airport.radius) {
-      warnings.push({
-        type: "airport",
-        message: `Within ${(airport.radius / 1000).toFixed(1)}km restricted zone of ${airport.name}. Launch activities prohibited.`,
-        distance,
-      });
-    } else if (distance < airport.radius * 2) {
-      warnings.push({
-        type: "airport",
-        message: `Near ${airport.name} (${(distance / 1000).toFixed(1)}km away). Exercise caution and check airspace regulations.`,
-        distance,
-      });
-    }
+  if (!osmData) {
+    warnings.push({
+      type: "other",
+      message: "Unable to verify restricted zones due to data service unavailability. Exercise extreme caution and manually verify airspace and local restrictions before any launch activities.",
+    });
   }
 
-  for (const military of RESTRICTED_ZONES.military) {
-    const distance = calculateDistance(
-      location.latitude,
-      location.longitude,
-      military.lat,
-      military.lon
-    );
+  if (osmData && osmData.elements) {
+    const processed = new Set<string>();
 
-    if (distance < military.radius) {
-      warnings.push({
-        type: "military",
-        message: `Within ${(military.radius / 1000).toFixed(1)}km of ${military.name}. Military restricted zone - launches strictly prohibited.`,
-        distance,
-      });
-    }
-  }
+    for (const element of osmData.elements) {
+      const elementLat = element.lat ?? element.center?.lat;
+      const elementLon = element.lon ?? element.center?.lon;
 
-  for (const school of RESTRICTED_ZONES.schools) {
-    const distance = calculateDistance(
-      location.latitude,
-      location.longitude,
-      school.lat,
-      school.lon
-    );
+      if (elementLat === null || elementLat === undefined || elementLon === null || elementLon === undefined) continue;
 
-    if (distance < school.radius) {
-      warnings.push({
-        type: "school",
-        message: `Within ${(school.radius / 1000).toFixed(1)}km of ${school.name}. Launch activities near educational facilities pose safety risks.`,
-        distance,
-      });
-    } else if (distance < school.radius * 2.5) {
-      warnings.push({
-        type: "school",
-        message: `Near ${school.name} (${(distance / 1000).toFixed(1)}km away). Ensure proper safety protocols for nearby educational institutions.`,
-        distance,
-      });
+      const distance = calculateDistance(
+        location.latitude,
+        location.longitude,
+        elementLat,
+        elementLon
+      );
+
+      const name = element.tags?.name || "Unnamed facility";
+      const elementId = `${element.type}-${element.id}`;
+
+      if (processed.has(elementId)) continue;
+      processed.add(elementId);
+
+      if (element.tags?.aeroway === "aerodrome" || element.tags?.aeroway === "airport") {
+        const criticalRadius = 8000;
+        const cautionRadius = 15000;
+
+        if (distance < criticalRadius) {
+          warnings.push({
+            type: "airport",
+            message: `CRITICAL: Inside or very close to ${name} airport. Rocket launches are strictly prohibited within ${(criticalRadius / 1000).toFixed(1)}km of airports.`,
+            distance,
+          });
+        } else if (distance < cautionRadius) {
+          warnings.push({
+            type: "airport",
+            message: `Near ${name} airport (${(distance / 1000).toFixed(1)}km away). Airspace restrictions apply. FAA/CAA approval required.`,
+            distance,
+          });
+        }
+      } else if (element.tags?.amenity === "school" || element.tags?.amenity === "university" || element.tags?.amenity === "college") {
+        const criticalRadius = 500;
+        const cautionRadius = 2000;
+
+        if (distance < criticalRadius) {
+          warnings.push({
+            type: "school",
+            message: `CRITICAL: Inside or adjacent to ${name}. Launching rockets near schools poses extreme safety risks and is prohibited.`,
+            distance,
+          });
+        } else if (distance < cautionRadius) {
+          warnings.push({
+            type: "school",
+            message: `Near ${name} (${(distance / 1000).toFixed(2)}km away). Exercise extreme caution and ensure proper safety protocols.`,
+            distance,
+          });
+        }
+      } else if (element.tags?.military || element.tags?.landuse === "military") {
+        const criticalRadius = 5000;
+        const cautionRadius = 10000;
+
+        if (distance < criticalRadius) {
+          warnings.push({
+            type: "military",
+            message: `CRITICAL: Inside or near ${name} military zone. Unauthorized launches in military areas are strictly prohibited.`,
+            distance,
+          });
+        } else if (distance < cautionRadius) {
+          warnings.push({
+            type: "military",
+            message: `Near ${name} military facility (${(distance / 1000).toFixed(1)}km away). Security restrictions may apply.`,
+            distance,
+          });
+        }
+      } else if (element.tags?.amenity === "hospital") {
+        const cautionRadius = 1500;
+
+        if (distance < cautionRadius) {
+          warnings.push({
+            type: "other",
+            message: `Near ${name} hospital (${(distance / 1000).toFixed(2)}km away). Consider impact on emergency services and patient safety.`,
+            distance,
+          });
+        }
+      }
     }
   }
 
@@ -132,19 +216,64 @@ export function validateZone(location: Location): ZoneValidation {
     });
   }
 
-  const isValid = warnings.filter((w) => w.type === "airport" || w.type === "military" || w.type === "school").length === 0;
-  
+  if (osmData && osmData.elements) {
+    const urbanAreas = osmData.elements.filter(
+      (e) => e.tags?.place === "city" || e.tags?.place === "town" || e.tags?.place === "suburb"
+    );
+
+    for (const urban of urbanAreas) {
+      const elementLat = urban.lat ?? urban.center?.lat;
+      const elementLon = urban.lon ?? urban.center?.lon;
+
+      if (elementLat === null || elementLat === undefined || elementLon === null || elementLon === undefined) continue;
+
+      const distance = calculateDistance(
+        location.latitude,
+        location.longitude,
+        elementLat,
+        elementLon
+      );
+
+      const population = urban.tags?.population ? parseInt(urban.tags.population) : 0;
+      const name = urban.tags?.name || "Urban area";
+
+      if (population > 100000 && distance < 10000) {
+        warnings.push({
+          type: "urban_dense",
+          message: `Inside or near dense urban area of ${name} (population: ${population.toLocaleString()}). Rocket launches in populated areas pose significant safety risks.`,
+          distance,
+        });
+      } else if (population > 50000 && distance < 5000) {
+        warnings.push({
+          type: "urban_dense",
+          message: `Within populated area of ${name} (${distance.toFixed(0)}m from center). Consider safety protocols for nearby residents.`,
+          distance,
+        });
+      } else if (distance < 2000 && urban.tags?.place === "suburb") {
+        warnings.push({
+          type: "urban_dense",
+          message: `Within residential suburb of ${name}. Ensure compliance with local ordinances regarding rocket activities.`,
+          distance,
+        });
+      }
+    }
+  }
+
   const hasCriticalViolation = warnings.some((w) => {
-    if (!w.distance) return false;
-    if (w.type === "airport" && w.distance < 15000) return true;
-    if (w.type === "military" && w.distance < 10000) return true;
-    if (w.type === "school" && w.distance < 2000) return true;
+    if (!w.distance) return w.message.includes("CRITICAL");
+    if (w.type === "airport" && w.distance < 8000) return true;
+    if (w.type === "military" && w.distance < 5000) return true;
+    if (w.type === "school" && w.distance < 500) return true;
     return false;
   });
 
+  const hasDataServiceWarning = warnings.some((w) => w.message.includes("Unable to verify restricted zones"));
+  
+  const isValid = !hasCriticalViolation && !hasDataServiceWarning && warnings.filter((w) => w.type === "airport" || w.type === "military" || w.type === "school").length === 0;
+
   const severity = hasCriticalViolation
     ? "danger"
-    : warnings.length > 0
+    : (warnings.length > 0 || hasDataServiceWarning)
     ? "caution"
     : "safe";
 
@@ -167,7 +296,7 @@ export async function analyzeLocation(
   location: Location,
   rocketConfig: RocketConfig
 ): Promise<AnalysisResult> {
-  const zoneValidation = validateZone(location);
+  const zoneValidation = await validateZone(location);
 
   const isModelRocket = rocketConfig.category === "model";
   const baseMultiplier = isModelRocket ? 1.2 : 0.8;

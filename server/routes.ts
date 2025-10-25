@@ -34,7 +34,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { location } = req.body;
       const validatedLocation = locationSchema.parse(location);
       
-      const validation = validateZone(validatedLocation);
+      const validation = await validateZone(validatedLocation);
       
       res.json(validation);
     } catch (error: any) {
