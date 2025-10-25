@@ -321,17 +321,21 @@ export async function analyzeLocation(
     zoneWarnings: zoneValidation.warnings.map(w => w.message),
   });
 
+  const zonePenalty = zoneValidation.severity === "danger" ? 40 : zoneValidation.severity === "caution" ? 20 : 0;
+  const airportWarnings = zoneValidation.warnings.filter(w => w.type === "airport");
+  const hasCloseAirport = airportWarnings.some(w => w.distance && w.distance < 8000);
+  
   const resources: ResourcesAnalysis = {
     materials: createFeasibilityScore(
-      Math.min(95, 60 + developmentLevel * 0.3 + (isModelRocket ? 20 : 0)),
+      Math.min(95, Math.max(20, 60 + developmentLevel * 0.3 + (isModelRocket ? 20 : 0) - zonePenalty * 0.3)),
       aiInsights.resourcesInsight
     ),
     expertise: createFeasibilityScore(
-      Math.min(95, 50 + developmentLevel * 0.4 + (rocketConfig.safetyLevel === "advanced" ? 15 : 0)),
+      Math.min(95, Math.max(20, 50 + developmentLevel * 0.4 + (rocketConfig.safetyLevel === "advanced" ? 15 : 0) - zonePenalty * 0.2)),
       aiInsights.resourcesInsight
     ),
     facilities: createFeasibilityScore(
-      Math.min(95, 40 + developmentLevel * 0.5 + (isModelRocket ? 25 : 0)),
+      Math.min(95, Math.max(15, 40 + developmentLevel * 0.5 + (isModelRocket ? 25 : 0) - zonePenalty * 0.4)),
       aiInsights.resourcesInsight
     ),
     overall: createFeasibilityScore(0, ""),
@@ -341,17 +345,19 @@ export async function analyzeLocation(
     aiInsights.resourcesInsight
   );
 
+  const legalBase = hasCloseAirport ? 15 : (zoneValidation.severity === "danger" ? 25 : 60);
+  
   const legal: LegalAnalysis = {
     permits: createFeasibilityScore(
-      Math.max(30, 70 - (zoneValidation.warnings.length * 15) + (isModelRocket ? 10 : -20)),
+      Math.max(10, Math.min(85, legalBase - (zoneValidation.warnings.length * 12) + (isModelRocket ? 10 : -20))),
       aiInsights.legalInsight
     ),
     regulations: createFeasibilityScore(
-      Math.max(25, 65 + politicalStability * 0.2 - (isModelRocket ? 0 : 15)),
+      Math.max(15, Math.min(90, legalBase + politicalStability * 0.15 - (isModelRocket ? 0 : 15) - zonePenalty * 0.5)),
       aiInsights.legalInsight
     ),
     restrictions: createFeasibilityScore(
-      zoneValidation.severity === "safe" ? 85 : zoneValidation.severity === "caution" ? 55 : 20,
+      hasCloseAirport ? 10 : (zoneValidation.severity === "safe" ? 85 : zoneValidation.severity === "caution" ? 50 : 18),
       aiInsights.legalInsight
     ),
     overall: createFeasibilityScore(0, ""),
@@ -361,17 +367,20 @@ export async function analyzeLocation(
     aiInsights.legalInsight
   );
 
+  const urbanWarnings = zoneValidation.warnings.filter(w => w.type === "urban_dense");
+  const urbanPenalty = urbanWarnings.length > 0 ? 15 : 0;
+  
   const geographical: GeographicalAnalysis = {
     terrain: createFeasibilityScore(
-      Math.min(90, 70 + (Math.abs(location.latitude) < 30 ? 10 : -5)),
+      Math.min(90, Math.max(30, 70 + (Math.abs(location.latitude) < 30 ? 10 : -5) - urbanPenalty)),
       aiInsights.geographicalInsight
     ),
     weather: createFeasibilityScore(
-      climateFactors.weatherScore,
+      Math.max(30, climateFactors.weatherScore - (zonePenalty * 0.1)),
       aiInsights.geographicalInsight
     ),
     accessibility: createFeasibilityScore(
-      Math.min(95, 55 + developmentLevel * 0.35),
+      Math.min(95, Math.max(25, 55 + developmentLevel * 0.35 - urbanPenalty * 0.8)),
       aiInsights.geographicalInsight
     ),
     overall: createFeasibilityScore(0, ""),
@@ -381,17 +390,20 @@ export async function analyzeLocation(
     aiInsights.geographicalInsight
   );
 
+  const militaryWarnings = zoneValidation.warnings.filter(w => w.type === "military");
+  const militaryPenalty = militaryWarnings.length > 0 ? 25 : 0;
+  
   const geopolitical: GeopoliticalAnalysis = {
     stability: createFeasibilityScore(
-      politicalStability,
+      Math.max(20, politicalStability - militaryPenalty),
       aiInsights.geopoliticalInsight
     ),
     cooperation: createFeasibilityScore(
-      Math.min(90, 50 + politicalStability * 0.4),
+      Math.min(90, Math.max(20, 50 + politicalStability * 0.4 - militaryPenalty * 0.6)),
       aiInsights.geopoliticalInsight
     ),
     risks: createFeasibilityScore(
-      Math.min(95, 85 - (100 - politicalStability) * 0.3),
+      Math.min(95, Math.max(15, 85 - (100 - politicalStability) * 0.3 - militaryPenalty)),
       aiInsights.geopoliticalInsight
     ),
     overall: createFeasibilityScore(0, ""),
@@ -426,26 +438,38 @@ export async function analyzeLocation(
     "Timing assessment based on seasonal patterns and current conditions."
   );
 
+  const totalWarnings = zoneValidation.warnings.length;
+  const criticalWarnings = zoneValidation.warnings.filter(w => 
+    (w.type === "airport" && w.distance && w.distance < 8000) ||
+    (w.type === "military" && w.distance && w.distance < 5000) ||
+    (w.type === "school" && w.distance && w.distance < 500)
+  ).length;
+  
   const practicality: PracticalityAnalysis = {
     cost: createFeasibilityScore(
-      isModelRocket ? 85 : Math.max(30, 40 + developmentLevel * 0.3),
+      isModelRocket 
+        ? Math.max(40, 85 - (totalWarnings * 5) - (criticalWarnings * 15))
+        : Math.max(20, 40 + developmentLevel * 0.3 - (totalWarnings * 3)),
       isModelRocket
         ? "Model rockets are highly cost-effective, with kits starting under $100."
         : "Industrial rockets require significant capital investment in millions of dollars."
     ),
     timeline: createFeasibilityScore(
-      isModelRocket ? 90 : 50 + (politicalStability * 0.3),
+      isModelRocket 
+        ? Math.max(35, 90 - (totalWarnings * 8) - (criticalWarnings * 20))
+        : Math.max(20, 50 + (politicalStability * 0.3) - (totalWarnings * 5)),
       isModelRocket
         ? "Model rocket projects can be completed in weeks to months."
         : "Industrial rocket development typically requires 2-5 years from planning to launch."
     ),
     successProbability: createFeasibilityScore(
       Math.max(
-        35,
+        10,
         60 +
           (rocketConfig.safetyLevel === "advanced" ? 15 : rocketConfig.safetyLevel === "intermediate" ? 5 : -5) +
-          (zoneValidation.severity === "safe" ? 10 : -10) +
-          (isModelRocket ? 10 : -15)
+          (zoneValidation.severity === "safe" ? 15 : zoneValidation.severity === "caution" ? -10 : -40) +
+          (isModelRocket ? 10 : -15) -
+          (criticalWarnings * 25)
       ),
       "Success probability based on experience level, location suitability, and project scope."
     ),
